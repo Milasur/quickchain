@@ -2,7 +2,8 @@
 
 | Amenaza | Mitigación | Estado |
 |---|---|---|
-| Agente comprometido gasta todo | tope por periodo en el contrato; `gastar` exige firma del agente | hecho (tests) |
+| Agente comprometido gasta todo | `__check_auth` de la cuenta-presupuesto: tope del periodo (con comisión), máximo por llamada, fin de periodo, pausa y rotación de llave | hecho (Q1, 11 tests) |
+| El agente intenta otra operación con la cuenta | `__check_auth` solo acepta `token.transfer(C, to≠C, monto)`; lo demás da `OperacionNoPermitida` | hecho (test `t05`) |
 | Otra cuenta se hace pasar por el agente | `agent.require_auth()` | hecho (test `agente_sin_firma_rechazado`) |
 | El agente cambia su propio tope | `renovar`/`cancelar` exigen firma del dueño | hecho (test `solo_dueno_renueva_o_cancela`) |
 | Gasto después de fin de mes | `PeriodoVencido` | hecho (test) |

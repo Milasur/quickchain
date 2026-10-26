@@ -111,6 +111,8 @@ graph TD
   docs_DEMO_md -.-> docs_PLAN_OPUS_md
   docs_PITCH_md -.-> docs_PLAN_OPUS_md
   contracts_budget_AGENTS_md -.-> docs_PLAN_OPUS_md
+  contracts_budget_AGENTS_md --> docs_DEMO_md
+  contracts_budget_AGENTS_md --> docs_DECISIONES_md
   agent_client_AGENTS_md -.-> docs_PLAN_OPUS_md
   api_demo_AGENTS_md -.-> docs_PLAN_OPUS_md
   web_AGENTS_md -.-> docs_PLAN_OPUS_md
@@ -133,7 +135,7 @@ graph TD
 - [Auditoría](AUDITORIA.md)
 - [Demo (testnet)](DEMO.md) — issue [#5](https://github.com/jxsu404/quickchain/issues/5)
 - [Pitch](PITCH.md) — issue [#6](https://github.com/jxsu404/quickchain/issues/6)
-- [contracts/budget](../contracts/budget/AGENTS.md) — issue [#1](https://github.com/jxsu404/quickchain/issues/1)
+- [contracts/budget](../contracts/budget/AGENTS.md) — issue [#1](https://github.com/jxsu404/quickchain/issues/1) — contrato `cuenta-presupuesto` desplegado en testnet (ver [Demo](DEMO.md))
 - [agent-client](../agent-client/AGENTS.md) — issue [#2](https://github.com/jxsu404/quickchain/issues/2)
 - [api-demo](../api-demo/AGENTS.md) — issue [#3](https://github.com/jxsu404/quickchain/issues/3)
 - [web](../web/AGENTS.md) — issue [#4](https://github.com/jxsu404/quickchain/issues/4)
