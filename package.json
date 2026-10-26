@@ -1,0 +1,12 @@
+{
+  "name": "quickchain",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "pnpm --filter api-demo dev",
+    "agente": "pnpm --filter agent-client start",
+    "contrato:test": "cargo test -p budget",
+    "typecheck": "pnpm -r typecheck"
+  }
+}
