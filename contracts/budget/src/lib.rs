@@ -1,97 +1,370 @@
 #![no_std]
-//! Presupuesto mensual en USDC para un agente de IA.
-//! El dueño firma UNA vez un tope por periodo; el agente gasta sin más firmas
-//! hasta llegar al tope o al fin del periodo. El contrato bloquea el sobregasto.
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, Address, Env};
+//! QuickChain — `cuenta-presupuesto` (docs/PLAN-OPUS.md §2).
+//!
+//! Cuenta-contrato `C…` por dueño. Guarda el USDC del mes y su `__check_auth`
+//! solo deja pasar `token.transfer(C, to, monto)` firmadas por la llave ed25519
+//! del agente, dentro del tope del periodo (comisión incluida), del máximo por
+//! llamada y antes del fin del periodo. Acumula una comisión (1 % = 100 bps)
+//! que cualquiera puede mandar a la tesorería fija con `cobrar_comision`.
+//! Sin admin ni `upgrade`: nadie cambia las reglas después del constructor.
+use soroban_sdk::{
+    auth::{Context, CustomAccountInterface},
+    contract, contracterror, contractimpl, contracttype,
+    crypto::Hash,
+    symbol_short, token, Address, BytesN, Env, TryFromVal, Vec,
+};
+
+/// Ledgers por día (~5 s por ledger).
+const DIA_LEDGERS: u32 = 17_280;
+/// Duración máxima de un periodo: 32 días.
+const MAX_PERIODO_SEG: u64 = 32 * 24 * 60 * 60;
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
-pub struct Presupuesto {
+pub struct Config {
     pub owner: Address,
-    pub agent: Address,
     pub token: Address,
-    pub cap: i128,        // tope por periodo (unidades del token, 7 decimales)
-    pub period: u64,      // duración del periodo en segundos (ej. 30 días)
-    pub inicio: u64,      // timestamp del inicio del periodo actual
-    pub gastado: i128,    // gastado en el periodo actual
-    pub activo: bool,
+    pub tesoreria: Address,
+    pub fee_bps: u32,
 }
 
 #[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Politica {
+    pub agente: BytesN<32>,
+    pub tope: i128,
+    pub max_por_llamada: i128,
+    pub fin_periodo: u64,
+    pub pausada: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Contadores {
+    pub periodo: u32,
+    /// Gastado en el periodo, comisión incluida.
+    pub gastado: i128,
+    /// Comisión acumulada sin cobrar (no se reinicia al renovar).
+    pub comision_pendiente: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Estado {
+    pub owner: Address,
+    pub agente: BytesN<32>,
+    pub token: Address,
+    pub tesoreria: Address,
+    pub fee_bps: u32,
+    pub periodo: u32,
+    pub tope: i128,
+    pub max_por_llamada: i128,
+    pub gastado: i128,
+    pub restante: i128,
+    pub fin_periodo: u64,
+    pub pausada: bool,
+    pub comision_pendiente: i128,
+    pub saldo: i128,
+}
+
+/// Firma del agente: misma forma que produce `authorizeEntry` del stellar-sdk
+/// con un `Keypair` (`Vec<{public_key, signature}>`).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct FirmaAgente {
+    pub public_key: BytesN<32>,
+    pub signature: BytesN<64>,
+}
+
+#[contracttype]
+#[derive(Clone)]
 pub enum Clave {
-    Presupuesto(Address), // por agente
+    Config,
+    Politica,
+    Contadores,
 }
 
 #[contracterror]
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum Error {
-    YaExiste = 1,
-    NoExiste = 2,
-    Inactivo = 3,
-    PeriodoVencido = 4,
-    TopeExcedido = 5,
+    Pausada = 1,
+    PeriodoVencido = 2,
+    FirmaInvalida = 3,
+    AgenteDesconocido = 4,
+    OperacionNoPermitida = 5,
     MontoInvalido = 6,
+    MontoPorLlamada = 7,
+    TopeAlcanzado = 8,
+    PeriodoInvalido = 9,
+    ParametrosInvalidos = 10,
 }
 
 #[contract]
-pub struct Budget;
+pub struct CuentaPresupuesto;
+
+fn config(env: &Env) -> Config {
+    env.storage().instance().get(&Clave::Config).unwrap()
+}
+fn politica(env: &Env) -> Politica {
+    env.storage().instance().get(&Clave::Politica).unwrap()
+}
+fn contadores(env: &Env) -> Contadores {
+    env.storage().instance().get(&Clave::Contadores).unwrap()
+}
+fn guardar_politica(env: &Env, p: &Politica) {
+    env.storage().instance().set(&Clave::Politica, p);
+}
+fn guardar_contadores(env: &Env, c: &Contadores) {
+    env.storage().instance().set(&Clave::Contadores, c);
+}
+fn extender_ttl(env: &Env) {
+    // Al menos dos periodos (64 días), sin pasar el máximo de la red.
+    let max = env.storage().max_ttl();
+    let hasta = core::cmp::min(64 * DIA_LEDGERS, max);
+    let umbral = core::cmp::min(32 * DIA_LEDGERS, hasta);
+    env.storage().instance().extend_ttl(umbral, hasta);
+}
+fn saldo(env: &Env, cfg: &Config) -> i128 {
+    token::TokenClient::new(env, &cfg.token).balance(&env.current_contract_address())
+}
+
+/// Comisión redondeada hacia arriba: ceil(monto * fee_bps / 10_000).
+pub fn calcular_comision(monto: i128, fee_bps: u32) -> Option<i128> {
+    let num = monto.checked_mul(fee_bps as i128)?;
+    Some((num.checked_add(9_999)?) / 10_000)
+}
+
+fn cobrar_pendiente(env: &Env, cfg: &Config) -> i128 {
+    let mut c = contadores(env);
+    let disponible = saldo(env, cfg);
+    let monto = core::cmp::min(c.comision_pendiente, disponible);
+    if monto > 0 {
+        token::TokenClient::new(env, &cfg.token).transfer(
+            &env.current_contract_address(),
+            &cfg.tesoreria,
+            &monto,
+        );
+        c.comision_pendiente -= monto;
+        guardar_contadores(env, &c);
+    }
+    monto
+}
 
 #[contractimpl]
-impl Budget {
-    /// El dueño firma una vez: autoriza que el agente gaste hasta `cap` por `period`.
-    pub fn crear_presupuesto(env: Env, owner: Address, agent: Address, token: Address, cap: i128, period: u64) -> Result<(), Error> {
-        owner.require_auth();
-        if cap <= 0 || period == 0 { return Err(Error::MontoInvalido); }
-        let k = Clave::Presupuesto(agent.clone());
-        if env.storage().persistent().has(&k) { return Err(Error::YaExiste); }
-        let p = Presupuesto { owner, agent, token, cap, period, inicio: env.ledger().timestamp(), gastado: 0, activo: true };
-        env.storage().persistent().set(&k, &p);
-        // TODO: el dueño debe dar `approve` del token al contrato por `cap` (o usar allowance propia).
+impl CuentaPresupuesto {
+    pub fn __constructor(
+        env: Env,
+        owner: Address,
+        agente: BytesN<32>,
+        token: Address,
+        tesoreria: Address,
+        fee_bps: u32,
+    ) -> Result<(), Error> {
+        if fee_bps > 10_000 {
+            return Err(Error::ParametrosInvalidos);
+        }
+        env.storage().instance().set(
+            &Clave::Config,
+            &Config { owner, token, tesoreria, fee_bps },
+        );
+        // Sin presupuesto hasta el primer `renovar`: tope 0 y periodo vencido.
+        guardar_politica(
+            &env,
+            &Politica { agente, tope: 0, max_por_llamada: 0, fin_periodo: 0, pausada: false },
+        );
+        guardar_contadores(&env, &Contadores { periodo: 0, gastado: 0, comision_pendiente: 0 });
+        extender_ttl(&env);
         Ok(())
     }
 
-    /// El agente paga `amount` a `to`. Falla si pasa el tope o venció el periodo.
-    pub fn gastar(env: Env, agent: Address, to: Address, amount: i128) -> Result<i128, Error> {
-        agent.require_auth();
-        if amount <= 0 { return Err(Error::MontoInvalido); }
-        let k = Clave::Presupuesto(agent.clone());
-        let mut p: Presupuesto = env.storage().persistent().get(&k).ok_or(Error::NoExiste)?;
-        if !p.activo { return Err(Error::Inactivo); }
-        if env.ledger().timestamp() >= p.inicio + p.period { return Err(Error::PeriodoVencido); }
-        let nuevo = p.gastado.checked_add(amount).ok_or(Error::MontoInvalido)?;
-        if nuevo > p.cap { return Err(Error::TopeExcedido); }
-        p.gastado = nuevo;
-        env.storage().persistent().set(&k, &p);
-        // Mueve USDC del dueño al destino usando la allowance dada al contrato.
-        token::Client::new(&env, &p.token).transfer_from(&env.current_contract_address(), &p.owner, &to, &amount);
-        // TODO: comisión del 1% a la cuenta de QuickChain.
-        Ok(p.cap - p.gastado)
-    }
-
-    /// Una firma del dueño abre un nuevo periodo (puede cambiar el tope).
-    pub fn renovar(env: Env, agent: Address, cap: i128) -> Result<(), Error> {
-        let k = Clave::Presupuesto(agent);
-        let mut p: Presupuesto = env.storage().persistent().get(&k).ok_or(Error::NoExiste)?;
-        p.owner.require_auth();
-        if cap <= 0 { return Err(Error::MontoInvalido); }
-        p.cap = cap; p.gastado = 0; p.inicio = env.ledger().timestamp(); p.activo = true;
-        env.storage().persistent().set(&k, &p);
+    /// La "firma única" del mes (dueño). Cobra la comisión pendiente, deposita
+    /// `recarga` desde el dueño, reinicia `gastado` y abre un periodo nuevo.
+    pub fn renovar(
+        env: Env,
+        tope: i128,
+        max_por_llamada: i128,
+        fin_periodo: u64,
+        recarga: i128,
+    ) -> Result<(), Error> {
+        let cfg = config(&env);
+        cfg.owner.require_auth();
+        if tope <= 0 || max_por_llamada <= 0 || max_por_llamada > tope || recarga < 0 {
+            return Err(Error::ParametrosInvalidos);
+        }
+        let ahora = env.ledger().timestamp();
+        if fin_periodo <= ahora || fin_periodo > ahora.saturating_add(MAX_PERIODO_SEG) {
+            return Err(Error::PeriodoInvalido);
+        }
+        cobrar_pendiente(&env, &cfg);
+        if recarga > 0 {
+            token::TokenClient::new(&env, &cfg.token).transfer(
+                &cfg.owner,
+                &env.current_contract_address(),
+                &recarga,
+            );
+        }
+        let mut p = politica(&env);
+        p.tope = tope;
+        p.max_por_llamada = max_por_llamada;
+        p.fin_periodo = fin_periodo;
+        guardar_politica(&env, &p);
+        let mut c = contadores(&env);
+        c.periodo = c.periodo.checked_add(1).ok_or(Error::ParametrosInvalidos)?;
+        c.gastado = 0;
+        guardar_contadores(&env, &c);
+        extender_ttl(&env);
+        env.events().publish((symbol_short!("renovar"), c.periodo), (tope, max_por_llamada, fin_periodo, recarga));
         Ok(())
     }
 
-    /// El dueño apaga el presupuesto; el agente ya no puede gastar.
-    pub fn cancelar(env: Env, agent: Address) -> Result<(), Error> {
-        let k = Clave::Presupuesto(agent);
-        let mut p: Presupuesto = env.storage().persistent().get(&k).ok_or(Error::NoExiste)?;
-        p.owner.require_auth();
-        p.activo = false;
-        env.storage().persistent().set(&k, &p);
+    pub fn pausar(env: Env) {
+        config(&env).owner.require_auth();
+        let mut p = politica(&env);
+        p.pausada = true;
+        guardar_politica(&env, &p);
+        env.events().publish((symbol_short!("pausa"),), true);
+    }
+
+    pub fn reanudar(env: Env) {
+        config(&env).owner.require_auth();
+        let mut p = politica(&env);
+        p.pausada = false;
+        guardar_politica(&env, &p);
+        env.events().publish((symbol_short!("pausa"),), false);
+    }
+
+    /// Rota la llave del agente (dueño).
+    pub fn cambiar_agente(env: Env, agente: BytesN<32>) {
+        config(&env).owner.require_auth();
+        let mut p = politica(&env);
+        p.agente = agente.clone();
+        guardar_politica(&env, &p);
+        env.events().publish((symbol_short!("agente"),), agente);
+    }
+
+    /// Retiro del dueño; no puede tocar la comisión pendiente.
+    pub fn retirar(env: Env, a: Address, monto: i128) -> Result<(), Error> {
+        let cfg = config(&env);
+        cfg.owner.require_auth();
+        if monto <= 0 {
+            return Err(Error::MontoInvalido);
+        }
+        let libre = saldo(&env, &cfg) - contadores(&env).comision_pendiente;
+        if monto > libre {
+            return Err(Error::ParametrosInvalidos);
+        }
+        token::TokenClient::new(&env, &cfg.token).transfer(&env.current_contract_address(), &a, &monto);
         Ok(())
     }
 
-    pub fn consultar(env: Env, agent: Address) -> Result<Presupuesto, Error> {
-        env.storage().persistent().get(&Clave::Presupuesto(agent)).ok_or(Error::NoExiste)
+    /// Pública: manda min(pendiente, saldo) a la tesorería fija.
+    pub fn cobrar_comision(env: Env) -> i128 {
+        let cfg = config(&env);
+        cobrar_pendiente(&env, &cfg)
+    }
+
+    pub fn estado(env: Env) -> Estado {
+        let cfg = config(&env);
+        let p = politica(&env);
+        let c = contadores(&env);
+        let s = saldo(&env, &cfg);
+        Estado {
+            owner: cfg.owner,
+            agente: p.agente,
+            token: cfg.token,
+            tesoreria: cfg.tesoreria,
+            fee_bps: cfg.fee_bps,
+            periodo: c.periodo,
+            tope: p.tope,
+            max_por_llamada: p.max_por_llamada,
+            gastado: c.gastado,
+            restante: if p.tope > c.gastado { p.tope - c.gastado } else { 0 },
+            fin_periodo: p.fin_periodo,
+            pausada: p.pausada,
+            comision_pendiente: c.comision_pendiente,
+            saldo: s,
+        }
+    }
+}
+
+#[contractimpl]
+impl CustomAccountInterface for CuentaPresupuesto {
+    type Signature = Vec<FirmaAgente>;
+    type Error = Error;
+
+    /// No emite eventos (los facilitadores estrictos solo aceptan `transfer`).
+    #[allow(non_snake_case)]
+    fn __check_auth(
+        env: Env,
+        payload: Hash<32>,
+        firmas: Vec<FirmaAgente>,
+        ctxs: Vec<Context>,
+    ) -> Result<(), Error> {
+        let cfg = config(&env);
+        let p = politica(&env);
+        // 1. no pausada; antes del fin del periodo
+        if p.pausada {
+            return Err(Error::Pausada);
+        }
+        if env.ledger().timestamp() >= p.fin_periodo {
+            return Err(Error::PeriodoVencido);
+        }
+        // 2. exactamente una firma, de la llave del agente
+        if firmas.len() != 1 {
+            return Err(Error::FirmaInvalida);
+        }
+        let f = firmas.get_unchecked(0);
+        if f.public_key != p.agente {
+            return Err(Error::AgenteDesconocido);
+        }
+        env.crypto().ed25519_verify(&f.public_key, &payload.into(), &f.signature);
+        // 3-5. cada contexto: token.transfer(C, to != C, 0 < monto <= max)
+        if ctxs.is_empty() {
+            return Err(Error::OperacionNoPermitida);
+        }
+        let yo = env.current_contract_address();
+        let mut c = contadores(&env);
+        for ctx in ctxs.iter() {
+            let cc = match ctx {
+                Context::Contract(cc) => cc,
+                _ => return Err(Error::OperacionNoPermitida),
+            };
+            if cc.contract != cfg.token || cc.fn_name != symbol_short!("transfer") || cc.args.len() != 3 {
+                return Err(Error::OperacionNoPermitida);
+            }
+            let from = Address::try_from_val(&env, &cc.args.get_unchecked(0))
+                .map_err(|_| Error::OperacionNoPermitida)?;
+            let to = Address::try_from_val(&env, &cc.args.get_unchecked(1))
+                .map_err(|_| Error::OperacionNoPermitida)?;
+            let monto = i128::try_from_val(&env, &cc.args.get_unchecked(2))
+                .map_err(|_| Error::OperacionNoPermitida)?;
+            if from != yo || to == yo {
+                return Err(Error::OperacionNoPermitida);
+            }
+            if monto <= 0 {
+                return Err(Error::MontoInvalido);
+            }
+            if monto > p.max_por_llamada {
+                return Err(Error::MontoPorLlamada);
+            }
+            let comision = calcular_comision(monto, cfg.fee_bps).ok_or(Error::MontoInvalido)?;
+            let nuevo = c
+                .gastado
+                .checked_add(monto)
+                .and_then(|x| x.checked_add(comision))
+                .ok_or(Error::TopeAlcanzado)?;
+            if nuevo > p.tope {
+                return Err(Error::TopeAlcanzado);
+            }
+            c.gastado = nuevo;
+            c.comision_pendiente = c
+                .comision_pendiente
+                .checked_add(comision)
+                .ok_or(Error::MontoInvalido)?;
+        }
+        guardar_contadores(&env, &c);
+        Ok(())
     }
 }
 

@@ -1,91 +1,255 @@
-#![cfg(test)]
+//! Los 11 tests mínimos de docs/PLAN-OPUS.md §2.3.
+extern crate std;
+
 use super::*;
+use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::{
-    testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
+    auth::ContractContext,
+    testutils::{Address as _, BytesN as _, Ledger},
     token::{StellarAssetClient, TokenClient},
-    Env, IntoVal,
+    vec, IntoVal, Symbol, Val,
 };
 
-const MES: u64 = 2_592_000; // 30 días
-const USDC: i128 = 10_000_000; // 1 USDC con 7 decimales
+const USDC: i128 = 10_000_000; // 7 decimales
+const CENTAVO: i128 = 100_000; // US$0,01
+const DIA: u64 = 24 * 60 * 60;
+const AHORA: u64 = 1_761_000_000;
 
-struct T { env: Env, c: BudgetClient<'static>, usdc: Address, owner: Address, agent: Address, api: Address }
+struct Prueba {
+    env: Env,
+    cuenta: Address,
+    cli: CuentaPresupuestoClient<'static>,
+    token: TokenClient<'static>,
+    owner: Address,
+    tesoreria: Address,
+    vendedor: Address,
+    agente: SigningKey,
+}
 
-fn preparar() -> T {
+fn llave(n: u8) -> SigningKey {
+    SigningKey::from_bytes(&[n; 32])
+}
+fn publica(env: &Env, k: &SigningKey) -> BytesN<32> {
+    BytesN::from_array(env, &k.verifying_key().to_bytes())
+}
+
+/// Cuenta con tope US$0,05, máximo US$0,02 por llamada, 30 días y US$1 de saldo.
+fn preparar() -> Prueba {
     let env = Env::default();
     env.mock_all_auths();
-    let usdc = env.register_stellar_asset_contract_v2(Address::generate(&env)).address();
-    let id = env.register(Budget, ());
-    let c = BudgetClient::new(&env, &id);
-    let (owner, agent, api) = (Address::generate(&env), Address::generate(&env), Address::generate(&env));
-    StellarAssetClient::new(&env, &usdc).mint(&owner, &(1_000 * USDC));
-    TokenClient::new(&env, &usdc).approve(&owner, &id, &(1_000 * USDC), &1_000_000);
-    c.crear_presupuesto(&owner, &agent, &usdc, &(100 * USDC), &MES);
-    T { env, c, usdc, owner, agent, api }
+    env.ledger().with_mut(|l| l.timestamp = AHORA);
+    let admin = Address::generate(&env);
+    let sac = env.register_stellar_asset_contract_v2(admin);
+    let token = TokenClient::new(&env, &sac.address());
+    let owner = Address::generate(&env);
+    let tesoreria = Address::generate(&env);
+    let vendedor = Address::generate(&env);
+    StellarAssetClient::new(&env, &sac.address()).mint(&owner, &(10 * USDC));
+    let agente = llave(7);
+    let cuenta = env.register(
+        CuentaPresupuesto,
+        (owner.clone(), publica(&env, &agente), sac.address(), tesoreria.clone(), 100u32),
+    );
+    let cli = CuentaPresupuestoClient::new(&env, &cuenta);
+    cli.renovar(&(5 * CENTAVO), &(2 * CENTAVO), &(AHORA + 30 * DIA), &USDC);
+    Prueba { env, cuenta, cli, token, owner, tesoreria, vendedor, agente }
+}
+
+fn ctx_transfer(t: &Prueba, from: &Address, to: &Address, monto: i128) -> Context {
+    Context::Contract(ContractContext {
+        contract: t.token.address.clone(),
+        fn_name: Symbol::new(&t.env, "transfer"),
+        args: (from.clone(), to.clone(), monto).into_val(&t.env),
+    })
+}
+
+fn check(t: &Prueba, k: &SigningKey, ctxs: Vec<Context>) -> Result<(), Error> {
+    let payload = BytesN::<32>::random(&t.env);
+    let sig = k.sign(&payload.to_array()).to_bytes();
+    let firmas = vec![
+        &t.env,
+        FirmaAgente { public_key: publica(&t.env, k), signature: BytesN::from_array(&t.env, &sig) },
+    ];
+    let firmas_val: Val = firmas.into_val(&t.env);
+    t.env
+        .try_invoke_contract_check_auth::<Error>(&t.cuenta, &payload, firmas_val, &ctxs)
+        .map_err(|e| e.expect("error de contrato"))
+}
+
+fn pagar(t: &Prueba, monto: i128) -> Result<(), Error> {
+    let c = ctx_transfer(t, &t.cuenta, &t.vendedor, monto);
+    check(t, &t.agente, vec![&t.env, c])
 }
 
 #[test]
-fn tope_se_respeta_y_paga() {
+fn t01_agente_paga_dentro_del_tope() {
     let t = preparar();
-    assert_eq!(t.c.gastar(&t.agent, &t.api, &(60 * USDC)), 40 * USDC);
-    assert_eq!(TokenClient::new(&t.env, &t.usdc).balance(&t.api), 60 * USDC);
-    assert_eq!(t.c.gastar(&t.agent, &t.api, &(40 * USDC)), 0); // justo al tope
+    assert_eq!(pagar(&t, CENTAVO), Ok(()));
+    let e = t.cli.estado();
+    assert_eq!(e.gastado, CENTAVO + 1_000);
+    assert_eq!(e.comision_pendiente, 1_000);
+    assert_eq!(e.restante, 5 * CENTAVO - CENTAVO - 1_000);
+    assert_eq!(e.saldo, USDC);
 }
 
 #[test]
-fn sobregasto_rechazado() {
+fn t02_pasarse_del_tope_con_comision() {
     let t = preparar();
-    t.c.gastar(&t.agent, &t.api, &(60 * USDC));
-    assert_eq!(t.c.try_gastar(&t.agent, &t.api, &(50 * USDC)), Err(Ok(Error::TopeExcedido)));
-    assert_eq!(TokenClient::new(&t.env, &t.usdc).balance(&t.api), 60 * USDC);
+    // 4 × (0,01 + comisión) = 404.000; un 5.º pago de 0,01 pasaría a 505.000 > 500.000
+    for _ in 0..4 {
+        assert_eq!(pagar(&t, CENTAVO), Ok(()));
+    }
+    assert_eq!(pagar(&t, CENTAVO), Err(Error::TopeAlcanzado));
+    assert_eq!(t.cli.estado().gastado, 4 * (CENTAVO + 1_000));
 }
 
 #[test]
-fn periodo_vencido_bloquea_y_renovar_reinicia() {
+fn t03_monto_mayor_al_maximo_por_llamada() {
     let t = preparar();
-    t.c.gastar(&t.agent, &t.api, &(100 * USDC));
-    t.env.ledger().with_mut(|l| l.timestamp += MES);
-    assert_eq!(t.c.try_gastar(&t.agent, &t.api, &USDC), Err(Ok(Error::PeriodoVencido)));
-    t.c.renovar(&t.agent, &(50 * USDC));
-    let p = t.c.consultar(&t.agent);
-    assert_eq!((p.cap, p.gastado), (50 * USDC, 0));
-    assert_eq!(t.c.gastar(&t.agent, &t.api, &(10 * USDC)), 40 * USDC);
+    assert_eq!(pagar(&t, USDC), Err(Error::MontoPorLlamada));
+    assert_eq!(pagar(&t, 0), Err(Error::MontoInvalido));
+    assert_eq!(t.cli.estado().gastado, 0);
 }
 
 #[test]
-fn cancelar_bloquea() {
+fn t04_firma_de_otra_llave() {
     let t = preparar();
-    t.c.cancelar(&t.agent);
-    assert_eq!(t.c.try_gastar(&t.agent, &t.api, &USDC), Err(Ok(Error::Inactivo)));
-}
-
-#[test]
-fn monto_invalido_y_duplicado() {
-    let t = preparar();
-    assert_eq!(t.c.try_gastar(&t.agent, &t.api, &0), Err(Ok(Error::MontoInvalido)));
-    assert_eq!(t.c.try_crear_presupuesto(&t.owner, &t.agent, &t.usdc, &USDC, &MES), Err(Ok(Error::YaExiste)));
-}
-
-#[test]
-fn agente_sin_firma_rechazado() {
-    let t = preparar();
-    let intruso = Address::generate(&t.env);
-    // Solo el intruso firma; el contrato exige la firma del agente.
-    t.env.set_auths(&[]);
-    let r = t.c.mock_auths(&[MockAuth {
-        address: &intruso,
-        invoke: &MockAuthInvoke { contract: &t.c.address, fn_name: "gastar", args: (&t.agent, &t.api, USDC).into_val(&t.env), sub_invokes: &[] },
-    }]).try_gastar(&t.agent, &t.api, &USDC);
+    let c = ctx_transfer(&t, &t.cuenta, &t.vendedor, CENTAVO);
+    assert_eq!(check(&t, &llave(9), vec![&t.env, c.clone()]), Err(Error::AgenteDesconocido));
+    // Llave pública correcta pero firma falsa: ed25519_verify aborta.
+    let payload = BytesN::<32>::random(&t.env);
+    let firmas = vec![
+        &t.env,
+        FirmaAgente { public_key: publica(&t.env, &t.agente), signature: BytesN::from_array(&t.env, &[1u8; 64]) },
+    ];
+    let r = t.env.try_invoke_contract_check_auth::<Error>(&t.cuenta, &payload, firmas.into_val(&t.env), &vec![&t.env, c]);
     assert!(r.is_err());
+    // Sin firmas
+    let vacias: Vec<FirmaAgente> = Vec::new(&t.env);
+    let r = t.env.try_invoke_contract_check_auth::<Error>(
+        &t.cuenta,
+        &BytesN::random(&t.env),
+        vacias.into_val(&t.env),
+        &vec![&t.env, ctx_transfer(&t, &t.cuenta, &t.vendedor, CENTAVO)],
+    );
+    assert_eq!(r.map_err(|e| e.unwrap()), Err(Error::FirmaInvalida));
 }
 
 #[test]
-fn solo_dueno_renueva_o_cancela() {
+fn t05_operaciones_no_permitidas() {
     let t = preparar();
+    let approve = Context::Contract(ContractContext {
+        contract: t.token.address.clone(),
+        fn_name: Symbol::new(&t.env, "approve"),
+        args: (t.cuenta.clone(), t.vendedor.clone(), CENTAVO, 1000u32).into_val(&t.env),
+    });
+    assert_eq!(check(&t, &t.agente, vec![&t.env, approve]), Err(Error::OperacionNoPermitida));
+    let otro = Context::Contract(ContractContext {
+        contract: Address::generate(&t.env),
+        fn_name: Symbol::new(&t.env, "transfer"),
+        args: (t.cuenta.clone(), t.vendedor.clone(), CENTAVO).into_val(&t.env),
+    });
+    assert_eq!(check(&t, &t.agente, vec![&t.env, otro]), Err(Error::OperacionNoPermitida));
+    let de_otro = ctx_transfer(&t, &t.owner, &t.vendedor, CENTAVO);
+    assert_eq!(check(&t, &t.agente, vec![&t.env, de_otro]), Err(Error::OperacionNoPermitida));
+    let a_si_misma = ctx_transfer(&t, &t.cuenta, &t.cuenta, CENTAVO);
+    assert_eq!(check(&t, &t.agente, vec![&t.env, a_si_misma]), Err(Error::OperacionNoPermitida));
+    let renovar = Context::Contract(ContractContext {
+        contract: t.cuenta.clone(),
+        fn_name: Symbol::new(&t.env, "renovar"),
+        args: ().into_val(&t.env),
+    });
+    assert_eq!(check(&t, &t.agente, vec![&t.env, renovar]), Err(Error::OperacionNoPermitida));
+    assert_eq!(t.cli.estado().gastado, 0);
+}
+
+#[test]
+fn t06_periodo_vencido_y_renovar() {
+    let t = preparar();
+    t.env.ledger().with_mut(|l| l.timestamp = AHORA + 30 * DIA);
+    assert_eq!(pagar(&t, CENTAVO), Err(Error::PeriodoVencido));
+    let ahora = AHORA + 30 * DIA;
+    t.cli.renovar(&(5 * CENTAVO), &(2 * CENTAVO), &(ahora + 30 * DIA), &0);
+    assert_eq!(pagar(&t, CENTAVO), Ok(()));
+    assert_eq!(t.cli.estado().periodo, 2);
+}
+
+#[test]
+fn t07_pausada() {
+    let t = preparar();
+    t.cli.pausar();
+    assert_eq!(pagar(&t, CENTAVO), Err(Error::Pausada));
+    t.cli.reanudar();
+    assert_eq!(pagar(&t, CENTAVO), Ok(()));
+    // Rotación de llave: la vieja deja de servir
+    let nueva = llave(8);
+    t.cli.cambiar_agente(&publica(&t.env, &nueva));
+    assert_eq!(pagar(&t, CENTAVO), Err(Error::AgenteDesconocido));
+    let c = ctx_transfer(&t, &t.cuenta, &t.vendedor, CENTAVO);
+    assert_eq!(check(&t, &nueva, vec![&t.env, c]), Ok(()));
+}
+
+#[test]
+fn t08_renovar_exige_dueno_y_periodo_valido() {
+    let t = preparar();
+    // Sin auths simuladas, renovar falla (no firmó el dueño).
     t.env.set_auths(&[]);
-    let r = t.c.mock_auths(&[MockAuth {
-        address: &t.agent,
-        invoke: &MockAuthInvoke { contract: &t.c.address, fn_name: "cancelar", args: (&t.agent,).into_val(&t.env), sub_invokes: &[] },
-    }]).try_cancelar(&t.agent);
+    let r = t.cli.try_renovar(&(5 * CENTAVO), &(2 * CENTAVO), &(AHORA + 10 * DIA), &0);
     assert!(r.is_err());
+    t.env.mock_all_auths();
+    let r = t.cli.try_renovar(&(5 * CENTAVO), &(2 * CENTAVO), &(AHORA + 40 * DIA), &0);
+    assert_eq!(r, Err(Ok(Error::PeriodoInvalido)));
+    let r = t.cli.try_renovar(&(5 * CENTAVO), &(2 * CENTAVO), &AHORA, &0);
+    assert_eq!(r, Err(Ok(Error::PeriodoInvalido)));
+    let r = t.cli.try_renovar(&CENTAVO, &(2 * CENTAVO), &(AHORA + DIA), &0);
+    assert_eq!(r, Err(Ok(Error::ParametrosInvalidos)));
+    // La auth pedida fue la del dueño
+    t.cli.renovar(&(5 * CENTAVO), &(2 * CENTAVO), &(AHORA + DIA), &0);
+    assert_eq!(t.env.auths()[0].0, t.owner);
+}
+
+#[test]
+fn t09_retirar_no_toca_la_comision() {
+    let t = preparar();
+    assert_eq!(pagar(&t, CENTAVO), Ok(()));
+    // Simula la liquidación del pago: la cuenta transfiere al vendedor.
+    t.token.transfer(&t.cuenta, &t.vendedor, &CENTAVO);
+    let saldo = t.token.balance(&t.cuenta);
+    assert_eq!(saldo, USDC - CENTAVO);
+    let r = t.cli.try_retirar(&t.owner, &saldo);
+    assert_eq!(r, Err(Ok(Error::ParametrosInvalidos)));
+    t.cli.retirar(&t.owner, &(saldo - 1_000));
+    assert_eq!(t.token.balance(&t.cuenta), 1_000);
+    assert_eq!(t.cli.estado().comision_pendiente, 1_000);
+}
+
+#[test]
+fn t10_cobrar_comision_publica_a_tesoreria_fija() {
+    let t = preparar();
+    assert_eq!(pagar(&t, CENTAVO), Ok(()));
+    assert_eq!(pagar(&t, 2 * CENTAVO), Ok(()));
+    // Nadie firma: cobrar_comision no exige auth.
+    t.env.set_auths(&[]);
+    assert_eq!(t.cli.cobrar_comision(), 3_000);
+    assert_eq!(t.token.balance(&t.tesoreria), 3_000);
+    assert_eq!(t.cli.estado().comision_pendiente, 0);
+    assert_eq!(t.cli.cobrar_comision(), 0);
+    // renovar también cobra lo pendiente antes de reiniciar
+    t.env.mock_all_auths();
+    assert_eq!(pagar(&t, CENTAVO), Ok(()));
+    t.cli.renovar(&(5 * CENTAVO), &(2 * CENTAVO), &(AHORA + DIA), &0);
+    assert_eq!(t.token.balance(&t.tesoreria), 4_000);
+    assert_eq!(t.cli.estado().gastado, 0);
+}
+
+#[test]
+fn t11_comision_redondea_hacia_arriba() {
+    assert_eq!(calcular_comision(CENTAVO, 100), Some(1_000)); // US$0,01 → 1.000 stroops
+    assert_eq!(calcular_comision(1, 100), Some(1));
+    assert_eq!(calcular_comision(101, 100), Some(2));
+    assert_eq!(calcular_comision(100, 100), Some(1));
+    assert_eq!(calcular_comision(i128::MAX, 100), None);
+    let t = preparar();
+    assert_eq!(pagar(&t, 1), Ok(()));
+    assert_eq!(t.cli.estado().comision_pendiente, 1);
 }
