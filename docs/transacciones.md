@@ -1,9 +1,22 @@
 # Transacciones (testnet)
 
-Tabla vacía a propósito. Q10 la llena con la corrida de punta a punta. Cada hash va con link `https://stellar.expert/explorer/testnet/tx/<hash>`.
+Q10 completa la corrida limpia; las filas Q3 son de la prueba del vendedor y el facilitador (cuentas desechables de testnet). Q10 la llena con la corrida de punta a punta. Cada hash va con link `https://stellar.expert/explorer/testnet/tx/<hash>`.
 
 | tx | qué prueba | link Stellar Expert testnet |
 |---|---|---|
+| `9cd2fa25` | Q3: deploy de cuenta-presupuesto desechable `CAUZN55N…` (wasm de Q1) | [9cd2fa25…](https://stellar.expert/explorer/testnet/tx/9cd2fa255d9a815c7f6be4ab8806525d5f976d08355fa19cf525bfff59dacbc8) |
+| `dd75fdb9` | Q3: `renovar` (tope 0,05, máx. 0,02, recarga 0,05) | [dd75fdb9…](https://stellar.expert/explorer/testnet/tx/dd75fdb9447ffdef07a79c9406292fab658ee08760aad17f2515bb6c85458e7a) |
+| `e82320dc` | Q3: pago x402 `exact` desde `G…`, facilitador **público** (`/tipo-cambio`, US$0,01) | [e82320dc…](https://stellar.expert/explorer/testnet/tx/e82320dc157bd63ddb31f821794569da5929b5f680cc07ac81376040910788e0) |
+| `62eee965` | Q3: pago x402 desde `G…`, facilitador **propio** (`/tipo-cambio`) | [62eee965…](https://stellar.expert/explorer/testnet/tx/62eee96503c2c7e3bd5342249bbd8a3e6fbac319028782647c93e5f0d92d6d7f) |
+| `77f4c55a` | Q3: pago x402 desde `G…`, facilitador propio (`/caro`, US$1) | [77f4c55a…](https://stellar.expert/explorer/testnet/tx/77f4c55a8857dde9cc7edfb3662beb67ddb06f28a20dfa6fb9a53310c4f32c0d) |
+| `436f2854` | Q3: pago x402 desde la **`C…`** (firma del agente), facilitador **propio**; fee cobrado 11.803 stroops | [436f2854…](https://stellar.expert/explorer/testnet/tx/436f28547e5b270c1cf4fa5c8f5a8436418c3cd641f8bf6051ff7f2e646564da) |
+| `9d9070bd` | Q3: `renovar` (recarga 1,2) para probar `/caro` | [9d9070bd…](https://stellar.expert/explorer/testnet/tx/9d9070bdcdc9bea2daf7c23a53cef10796865acf06e66141b9cb52c2774ef743) |
+| `d0e333b2` | Q3: pago x402 desde la **`C…`**, facilitador **público** (pago 1/4) | [d0e333b2…](https://stellar.expert/explorer/testnet/tx/d0e333b29eb42b717426844ebf4dc443083fc2abaa72e5c60d454f137d1b1fc0) |
+| `c8012dfe` | Q3: pago 2/4 desde la `C…` (público) | [c8012dfe…](https://stellar.expert/explorer/testnet/tx/c8012dfea83022a4acd0b9b218b5163d4e15324bf0fcfab011572925052f2dca) |
+| `fd957785` | Q3: pago 3/4 desde la `C…` (público) | [fd957785…](https://stellar.expert/explorer/testnet/tx/fd95778529947eacd0c6b9f2cb05ed57a018cb3695366bc8e2a33e8527c05756) |
+| `947c51f9` | Q3: pago 4/4 desde la `C…` (público) | [947c51f9…](https://stellar.expert/explorer/testnet/tx/947c51f9fe4b4a31504bcc722b0f135472a3146f93efb0fdffd536d057bd7852) |
+| — (sin tx) | Q3: 5.º pago desde la `C…` bloqueado en simulación: `Error(Contract, #8)` = `TopeAlcanzado`. No se movió plata | — |
+| — (sin tx) | Q3: `/caro` (US$1) desde la `C…` bloqueado: `Error(Contract, #7)` = `MontoPorLlamada` | — |
 
 <!-- enlaces:auto -->
 ## Enlaces
@@ -11,6 +24,6 @@ Tabla vacía a propósito. Q10 la llena con la corrida de punta a punta. Cada ha
 - ⬆️ Arriba: [Mapa (hub)](MAPA.md) · [Índice de docs](INDICE.md)
 - 📖 Fuente de verdad: [PLAN-OPUS — la biblia](PLAN-OPUS.md)
 - Relacionado: [Demo (testnet)](DEMO.md)
-- Lo enlazan: [Demo (testnet)](DEMO.md) · [Índice de docs](INDICE.md) · [Mapa (hub)](MAPA.md)
+- Lo enlazan: [api-demo](../api-demo/AGENTS.md) · [Decisiones](DECISIONES.md) · [Demo (testnet)](DEMO.md) · [Índice de docs](INDICE.md) · [Mapa (hub)](MAPA.md)
 - Tags: #quickchain #docs
 <!-- /enlaces:auto -->
