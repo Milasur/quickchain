@@ -1,4 +1,4 @@
-//! Los 11 tests mínimos de docs/PLAN-OPUS.md §2.3.
+//! Los 11 tests mínimos de docs/PLAN-OPUS.md §2.3 (t01–t11) y casos borde extra (t12–t17).
 extern crate std;
 
 use super::*;
@@ -252,4 +252,91 @@ fn t11_comision_redondea_hacia_arriba() {
     let t = preparar();
     assert_eq!(pagar(&t, 1), Ok(()));
     assert_eq!(t.cli.estado().comision_pendiente, 1);
+}
+
+// ---- Casos borde extra (auditoría Q1, no están en §2.3) ----
+
+#[test]
+fn t12_tope_exacto_y_un_stroop_mas() {
+    let t = preparar();
+    for _ in 0..4 {
+        assert_eq!(pagar(&t, CENTAVO), Ok(()));
+    }
+    // Restan 96.000: 95.049 + ceil(950,49) = 95.049 + 951 = 96.000 exacto.
+    assert_eq!(pagar(&t, 95_049), Ok(()));
+    let e = t.cli.estado();
+    assert_eq!((e.gastado, e.restante), (5 * CENTAVO, 0));
+    assert_eq!(pagar(&t, 1), Err(Error::TopeAlcanzado));
+}
+
+#[test]
+fn t13_varias_transferencias_en_una_auth() {
+    let t = preparar();
+    let c = |m| ctx_transfer(&t, &t.cuenta, &t.vendedor, m);
+    // Se suman todas: 3 × (0,02 + 0,0002) = 606.000 > 500.000.
+    assert_eq!(check(&t, &t.agente, vec![&t.env, c(2 * CENTAVO), c(2 * CENTAVO), c(2 * CENTAVO)]), Err(Error::TopeAlcanzado));
+    assert_eq!(t.cli.estado().gastado, 0, "un error no deja contadores a medias");
+    // Una transferencia válida + una operación prohibida: se rechaza todo.
+    let approve = Context::Contract(ContractContext {
+        contract: t.token.address.clone(),
+        fn_name: Symbol::new(&t.env, "approve"),
+        args: (t.cuenta.clone(), t.vendedor.clone(), CENTAVO, 1000u32).into_val(&t.env),
+    });
+    assert_eq!(check(&t, &t.agente, vec![&t.env, c(CENTAVO), approve]), Err(Error::OperacionNoPermitida));
+    // Dos válidas: cuentan las dos.
+    assert_eq!(check(&t, &t.agente, vec![&t.env, c(CENTAVO), c(CENTAVO)]), Ok(()));
+    assert_eq!(t.cli.estado().gastado, 2 * (CENTAVO + 1_000));
+}
+
+#[test]
+fn t14_borde_del_fin_de_periodo() {
+    let t = preparar();
+    t.env.ledger().with_mut(|l| l.timestamp = AHORA + 30 * DIA - 1);
+    assert_eq!(pagar(&t, CENTAVO), Ok(()));
+    t.env.ledger().with_mut(|l| l.timestamp = AHORA + 30 * DIA);
+    assert_eq!(pagar(&t, CENTAVO), Err(Error::PeriodoVencido));
+    // `renovar` no acepta más de 32 días
+    let ahora = AHORA + 30 * DIA;
+    assert_eq!(t.cli.try_renovar(&(5 * CENTAVO), &(2 * CENTAVO), &(ahora + 32 * DIA + 1), &0), Err(Ok(Error::PeriodoInvalido)));
+    t.cli.renovar(&(5 * CENTAVO), &(2 * CENTAVO), &(ahora + 32 * DIA), &0);
+    assert_eq!(t.cli.estado().gastado, 0);
+}
+
+#[test]
+fn t15_overflow_no_rompe_el_tope() {
+    let t = preparar();
+    t.cli.renovar(&i128::MAX, &i128::MAX, &(AHORA + DIA), &0);
+    // monto × fee_bps desborda → error controlado, sin pánico ni gasto.
+    assert_eq!(pagar(&t, i128::MAX), Err(Error::MontoInvalido));
+    // Montos grandes válidos: el segundo haría desbordar gastado + monto + comisión.
+    let grande = i128::MAX / 1000;
+    for _ in 0..990 {
+        assert_eq!(pagar(&t, grande), Ok(()));
+    }
+    let antes = t.cli.estado().gastado;
+    assert_eq!(pagar(&t, grande), Err(Error::TopeAlcanzado));
+    assert_eq!(t.cli.estado().gastado, antes);
+    assert!(t.cli.estado().gastado <= i128::MAX);
+}
+
+#[test]
+fn t16_firmas_de_mas_y_monto_negativo() {
+    let t = preparar();
+    let payload = BytesN::<32>::random(&t.env);
+    let f = |k: &SigningKey| {
+        let sig = k.sign(&payload.to_array()).to_bytes();
+        FirmaAgente { public_key: publica(&t.env, k), signature: BytesN::from_array(&t.env, &sig) }
+    };
+    let dos = vec![&t.env, f(&t.agente), f(&t.agente)];
+    let r = t.env.try_invoke_contract_check_auth::<Error>(&t.cuenta, &payload, dos.into_val(&t.env), &vec![&t.env, ctx_transfer(&t, &t.cuenta, &t.vendedor, CENTAVO)]);
+    assert_eq!(r.map_err(|e| e.unwrap()), Err(Error::FirmaInvalida));
+    assert_eq!(pagar(&t, -1), Err(Error::MontoInvalido));
+}
+
+#[test]
+#[should_panic]
+fn t17_constructor_rechaza_fee_mayor_a_100_por_ciento() {
+    let env = Env::default();
+    let a = Address::generate(&env);
+    env.register(CuentaPresupuesto, (a.clone(), BytesN::<32>::random(&env), a.clone(), a, 10_001u32));
 }
