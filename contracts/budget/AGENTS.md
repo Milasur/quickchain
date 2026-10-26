@@ -8,3 +8,14 @@ Contrato Soroban (Rust, `soroban-sdk` 22) que guarda un presupuesto por agente.
 
 Comandos: `cargo test -p budget` · build wasm: `stellar contract build` (requiere target wasm32v1-none).
 Nota: `Cargo.lock` fija `ed25519-dalek` 2.2.0 para compilar con rustc 1.85. No lo borres.
+
+## Tests (7, todos pasan con `cargo test -p budget`)
+| Test | Qué prueba |
+|---|---|
+| tope_se_respeta_y_paga | gasta dentro del tope, el USDC llega al destino, se puede llegar justo al tope |
+| sobregasto_rechazado | pasarse del tope da `TopeExcedido` y no mueve fondos |
+| periodo_vencido_bloquea_y_renovar_reinicia | al terminar el periodo da `PeriodoVencido`; `renovar` reinicia gastado y tope |
+| cancelar_bloquea | tras `cancelar`, `gastar` da `Inactivo` |
+| monto_invalido_y_duplicado | monto 0 rechazado; no se crea dos veces el mismo agente |
+| agente_sin_firma_rechazado | si firma otra cuenta (no el agente), `gastar` falla |
+| solo_dueno_renueva_o_cancela | el agente no puede cancelar su propio presupuesto |
