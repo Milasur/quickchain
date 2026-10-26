@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.next/
+out/
+target/
+*.log
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secret*
+.stellar/
+.soroban/
+.DS_Store
