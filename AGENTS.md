@@ -11,7 +11,7 @@ Ver [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md). Resumen: `web` (dueño, Cavos)
 - `agent-client/` — TS + @stellar/stellar-sdk. [AGENTS.md](agent-client/AGENTS.md)
 - `api-demo/` — Next.js + @x402/core + @x402/stellar. [AGENTS.md](api-demo/AGENTS.md)
 - `web/` — Next.js + @cavos/kit. [AGENTS.md](web/AGENTS.md)
-- `docs/` — [INDICE.md](docs/INDICE.md). `buzon/` — pedidos entre integrantes.
+- `docs/` — [INDICE.md](docs/INDICE.md).
 
 ## Comandos
 `pnpm install` · `pnpm contrato:test` · `pnpm dev:api` · `pnpm dev:web` · `pnpm agente` · `pnpm typecheck`
@@ -29,7 +29,7 @@ Rama `rol/<nombre>`, PR a `main`, commits pequeños. Detalle en [CONTRIBUTING.md
 Nunca escribas llaves, semillas ni `.env` en el repo. Usá `.env` local (ignorado) y agregá solo el **nombre** a `.env.example`.
 
 ## Buzón
-Si necesitás algo de otra persona, creá `buzon/NNN-de-a-asunto.md` siguiendo [buzon/README.md](buzon/README.md).
+El buzón del equipo vive en el repo privado `jxsu404/quickchain-buzon` (acceso por invitación). Ahí van los pedidos entre integrantes.
 
 ## Definición de listo
 1. Cumple el criterio de su tarea en [TAREAS.md](TAREAS.md).

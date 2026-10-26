@@ -7,4 +7,4 @@
 5. **Sin Writz ni Bitcoin:** quedaron fuera del producto.
 6. **Lenguaje legal:** no digas "inversión", "ganancia", "rendimiento" ni "sin riesgo".
 7. **Cifras con fuente:** toda cifra en docs o pitch lleva su link.
-8. **Pedidos entre nosotros:** por el [buzón](buzon/README.md).
+8. **Pedidos entre nosotros:** por el buzón, repo privado `quickchain-buzon` (acceso por invitación).

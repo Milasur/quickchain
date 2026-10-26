@@ -40,7 +40,7 @@ pnpm agente                   # el agente llama a la API hasta chocar con el top
 | `api-demo` | API de prueba que cobra con x402 (Next.js) |
 | `web` | Web del dueño con login Cavos (Next.js) |
 | `docs/` | Plan, arquitectura, decisiones, seguridad, demo ([índice](docs/INDICE.md)) |
-| `buzon/` | Pedidos entre integrantes del equipo |
+| (privado) | Buzón del equipo: repo privado `quickchain-buzon`, acceso por invitación |
 
 Ver también: [TAREAS.md](TAREAS.md) · [CONTRIBUTING.md](CONTRIBUTING.md) · [AGENTS.md](AGENTS.md).
 

@@ -12,4 +12,4 @@
 | [../TAREAS.md](../TAREAS.md) | Tareas y fecha límite |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Reglas del equipo |
 | [../AGENTS.md](../AGENTS.md) | Contexto para agentes de código |
-| [../buzon/README.md](../buzon/README.md) | Pedidos entre integrantes |
+| `quickchain-buzon` (repo privado, por invitación) | Pedidos entre integrantes |
