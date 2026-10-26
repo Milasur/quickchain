@@ -1,0 +1,8 @@
+{
+  "name": "agent-client",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "tsx src/demo.ts", "typecheck": "tsc --noEmit" },
+  "dependencies": { "@stellar/stellar-sdk": "^16.4.1", "dotenv": "^17" },
+  "devDependencies": { "@types/node": "^24", "tsx": "^4", "typescript": "^5" }
+}
