@@ -27,3 +27,7 @@ Q10 completa la corrida limpia; las filas Q3 son de la prueba del vendedor y el 
 - Lo enlazan: [api-demo](../api-demo/AGENTS.md) · [Decisiones](DECISIONES.md) · [Demo (testnet)](DEMO.md) · [Índice de docs](INDICE.md) · [Mapa (hub)](MAPA.md)
 - Tags: #quickchain #docs
 <!-- /enlaces:auto -->
+
+## Fondos de prueba
+
+- 2026-10-25: se consiguieron 2 USDC de prueba (Circle, testnet) cambiando XLM en el exchange de testnet, porque el faucet de Circle requiere navegador. Pendiente: usar primero la cuenta del equipo, como dice el plan.
