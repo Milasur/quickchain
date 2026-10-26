@@ -13,6 +13,7 @@
 | [AUDITORIA.md](AUDITORIA.md) | Lista de revisión y resultados |
 | [DEMO.md](DEMO.md) | Guion de la demo y links de transacciones |
 | [transacciones.md](transacciones.md) | Hashes de testnet (vacío hasta Q10) y link a Stellar Expert |
+| [COSTOS.md](COSTOS.md) | Fees medidos en testnet y comisión de 1 % (Q8) |
 | [PITCH.md](PITCH.md) | Pitch (borrador) |
 | [../TAREAS.md](../TAREAS.md) | Tareas y fecha límite |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Reglas del equipo |
