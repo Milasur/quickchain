@@ -13,6 +13,7 @@
 | 2026-10-25 | Q1: se mantiene la carpeta `contracts/budget` y el crate `budget` (struct `CuentaPresupuesto`) en vez de `contracts/cuenta-presupuesto/` | no romper `pnpm contrato:test`, enlaces ni CI; el plan lo marcaba como "propuesto" |
 | 2026-10-25 | Q1: comisión 1 % (`fee_bps = 100`) redondeada hacia arriba, incluida en el tope, acumulada en `comision_pendiente` y cobrada en `renovar` o con `cobrar_comision()` (pública, a tesorería fija) | `__check_auth` no puede mover fondos (PLAN-OPUS §2.2); cierra la pregunta abierta 2 |
 | 2026-10-25 | Q1: token = SAC del USDC de Circle en testnet (`USDC:GBBD47…` → `CBIELTK6…DAMA`). Ojo: el plan dice no usar `CBIELTK6…` "de Writz", pero ese ID **es** el SAC del USDC de Circle (`stellar contract id asset`). Lo confirma Josué | dato verificado con la CLI |
+| 2026-10-25 | Q1: `CBIELTK6…` verificado con 3 fuentes (CLI, Horizon `/assets`, docs de Circle): es el USDC de Circle, no de Writz. Pruebas en testnet con USDC obtenido por path payment XLM→USDC en el DEX (el faucet de Circle no tiene API usable) | ver [pruebas-q1.md](pruebas-q1.md) |
 
 ## Preguntas abiertas
 1. **Cómo prueba el agente el pago a la API.** El esquema x402 `exact` espera un pago firmado por quien paga; en QuickChain paga el contrato. Opción MVP: el agente manda `X-QUICKCHAIN-TX` y `api-demo` verifica la tx en el RPC (destino, monto, contrato). Alternativa: el contrato autoriza y el agente firma un `exact` normal. Decidir en tarea 2/3.

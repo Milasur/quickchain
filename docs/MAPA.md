@@ -18,6 +18,7 @@ graph TD
   docs_AUDITORIA_md["Auditoría"]
   docs_DEMO_md["Demo (testnet)"]
   docs_PITCH_md["Pitch"]
+  docs_pruebas_q1_md["Pruebas Q1"]
   contracts_budget_AGENTS_md["contracts/budget"]
   agent_client_AGENTS_md["agent-client"]
   api_demo_AGENTS_md["api-demo"]
@@ -113,6 +114,9 @@ graph TD
   contracts_budget_AGENTS_md -.-> docs_PLAN_OPUS_md
   contracts_budget_AGENTS_md --> docs_DEMO_md
   contracts_budget_AGENTS_md --> docs_DECISIONES_md
+  contracts_budget_AGENTS_md --> docs_pruebas_q1_md
+  docs_DEMO_md --> docs_pruebas_q1_md
+  docs_pruebas_q1_md -.-> docs_PLAN_OPUS_md
   agent_client_AGENTS_md -.-> docs_PLAN_OPUS_md
   api_demo_AGENTS_md -.-> docs_PLAN_OPUS_md
   web_AGENTS_md -.-> docs_PLAN_OPUS_md
@@ -134,6 +138,7 @@ graph TD
 - [Seguridad](SEGURIDAD.md)
 - [Auditoría](AUDITORIA.md)
 - [Demo (testnet)](DEMO.md) — issue [#5](https://github.com/jxsu404/quickchain/issues/5)
+- [Pruebas Q1 (testnet)](pruebas-q1.md) — issue [#1](https://github.com/jxsu404/quickchain/issues/1)
 - [Pitch](PITCH.md) — issue [#6](https://github.com/jxsu404/quickchain/issues/6)
 - [contracts/budget](../contracts/budget/AGENTS.md) — issue [#1](https://github.com/jxsu404/quickchain/issues/1) — contrato `cuenta-presupuesto` desplegado en testnet (ver [Demo](DEMO.md))
 - [agent-client](../agent-client/AGENTS.md) — issue [#2](https://github.com/jxsu404/quickchain/issues/2)
@@ -145,7 +150,7 @@ graph TD
 | Tarea | Nodo | Issue |
 |---|---|---|
 | Q0 | [../AGENTS.md](../AGENTS.md) | — |
-| Q1 | [../contracts/budget/AGENTS.md](../contracts/budget/AGENTS.md) | [#1](https://github.com/jxsu404/quickchain/issues/1) |
+| Q1 | [../contracts/budget/AGENTS.md](../contracts/budget/AGENTS.md) · [pruebas-q1.md](pruebas-q1.md) | [#1](https://github.com/jxsu404/quickchain/issues/1) |
 | Q2 | [../agent-client/AGENTS.md](../agent-client/AGENTS.md) | [#2](https://github.com/jxsu404/quickchain/issues/2) |
 | Q3 | [../api-demo/AGENTS.md](../api-demo/AGENTS.md) | [#3](https://github.com/jxsu404/quickchain/issues/3) |
 | Q4 | [../web/AGENTS.md](../web/AGENTS.md) | [#4](https://github.com/jxsu404/quickchain/issues/4) |
