@@ -19,13 +19,13 @@ fn estado() -> Estado; // owner, agente, token, tesoreria, fee_bps, periodo, top
 - Montos en unidades de 7 decimales (`1 USDC = 10_000_000`).
 
 ## Comandos
-- Tests: `cargo test -p budget` (11 tests).
+- Tests: `cargo test -p budget` (17 tests). Pruebas reales en testnet: `node scripts/pruebas-q1.mjs` → [pruebas-q1](../../docs/pruebas-q1.md).
 - Wasm: `stellar contract build --package budget` (target `wasm32v1-none`, rustc ≥ 1.84).
 - Deploy a testnet: `bash scripts/deploy-cuenta.sh` (lee `.env`: `DEPLOYER_SECRET_KEY`, `AGENT_SECRET_KEY` o `AGENT_PUBLIC_KEY_HEX`; opcionales `OWNER_ADDRESS`, `QUICKCHAIN_TESORERIA`, `USDC_CONTRACT_ID`, `FEE_BPS`). Escribe `deployments/testnet.json`.
 - Despliegue actual: ver [`deployments/testnet.json`](../../deployments/testnet.json) y [Demo](../../docs/DEMO.md).
 - `Cargo.lock` fija `ed25519-dalek` 2.2.0. No lo borres.
 
-## Tests (11, PLAN-OPUS §2.3)
+## Tests (17: los 11 de PLAN-OPUS §2.3 + 6 de casos borde)
 | Test | Qué prueba |
 |---|---|
 | t01_agente_paga_dentro_del_tope | pago válido; suben `gastado` y la comisión |
@@ -39,6 +39,14 @@ fn estado() -> Estado; // owner, agente, token, tesoreria, fee_bps, periodo, top
 | t09_retirar_no_toca_la_comision | `retirar` deja intacta la comisión pendiente |
 | t10_cobrar_comision_publica_a_tesoreria_fija | cualquiera cobra; va solo a la tesorería; `renovar` también cobra |
 | t11_comision_redondea_hacia_arriba | 0,01 USDC → 1 000 stroops; 1 stroop → 1 |
+| t12_tope_exacto_y_un_stroop_mas | llenar el tope exacto pasa; 1 stroop más da `TopeAlcanzado` |
+| t13_varias_transferencias_en_una_auth | 2 transfers en una auth se suman al tope; si una se pasa, no se guarda nada |
+| t14_borde_del_fin_de_periodo | `ahora = fin − 1` pasa, `ahora = fin` da `PeriodoVencido`; `renovar` a 32 d + 1 da `PeriodoInvalido` |
+| t15_overflow_no_rompe_el_tope | montos cercanos a `i128::MAX` no desbordan: `TopeAlcanzado` y contadores intactos |
+| t16_firmas_de_mas_y_monto_negativo | 2 firmas dan `FirmaInvalida`; monto negativo da `MontoInvalido` |
+| t17_constructor_rechaza_fee_mayor_a_100_por_ciento | `fee_bps = 10 001` hace fallar el constructor |
+
+Notas: una firma ed25519 inválida aborta en el host (no devuelve `FirmaInvalida`); `to` muxed (`M…`) se rechaza; `__check_auth` revisa todos los contextos, incluidas subinvocaciones, así que un contrato intermedio no sirve para colar otra operación.
 
 ## Cambio de interfaz (afecta a otros paquetes)
 Ya no existen `crear_presupuesto`, `gastar`, `consultar`, `cancelar` ni el flujo `approve`/`transfer_from`.
@@ -50,7 +58,7 @@ Ya no existen `crear_presupuesto`, `gastar`, `consultar`, `cancelar` ni el flujo
 
 - ⬆️ Arriba: [Mapa (hub)](../../docs/MAPA.md) · [Índice de docs](../../docs/INDICE.md)
 - 📖 Fuente de verdad: [PLAN-OPUS — la biblia](../../docs/PLAN-OPUS.md)
-- Relacionado: [agent-client](../../agent-client/AGENTS.md) · [Seguridad](../../docs/SEGURIDAD.md) · [Demo (testnet)](../../docs/DEMO.md) · [Decisiones](../../docs/DECISIONES.md)
+- Relacionado: [Pruebas Q1](../../docs/pruebas-q1.md) · [agent-client](../../agent-client/AGENTS.md) · [Seguridad](../../docs/SEGURIDAD.md) · [Demo (testnet)](../../docs/DEMO.md) · [Decisiones](../../docs/DECISIONES.md)
 - Issue: [#1](https://github.com/jxsu404/quickchain/issues/1)
 - Lo enlazan: [AGENTS (raíz)](../../AGENTS.md) · [Tareas](../../TAREAS.md) · [agent-client](../../agent-client/AGENTS.md) · [Arquitectura](../../docs/ARQUITECTURA.md) · [Mapa (hub)](../../docs/MAPA.md) · [PLAN-OPUS — la biblia](../../docs/PLAN-OPUS.md) · [Seguridad](../../docs/SEGURIDAD.md) · [web](../../web/AGENTS.md)
 - Tags: #quickchain #paquete
