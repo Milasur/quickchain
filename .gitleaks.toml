@@ -1,0 +1,10 @@
+# Config de gitleaks: reglas por defecto + allowlist de llaves PÚBLICAS ed25519 (hex) en deployments/.
+# Las llaves secretas viven solo en .env (gitignored).
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Llaves públicas ed25519 del agente en deployments/*.json"
+paths = ['''deployments/.*\.json''']
+regexTarget = "line"
+regexes = ['''"(agente_ed25519_hex|agente2_ed25519_hex|agente2_hex|ajena_hex|llave_ajena_hex|[a-z0-9_]*_hex)"\s*:''']
